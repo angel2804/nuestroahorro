@@ -45,7 +45,6 @@ export default function App() {
   const [splash, setSplash] = useState(true)
   const [movimientos, setMovimientos] = useState([])
   const [perfiles, setPerfiles] = useState({})
-  const [meta, setMeta] = useState({ nombre: 'Nuestra meta', objetivo: 1500 })
   const [usuario, setUsuario] = useState(() => sessionStorage.getItem('na_usuario') || null)
 
   const [modalAbierto, setModalAbierto] = useState(false)
@@ -53,10 +52,11 @@ export default function App() {
   const [filtro, setFiltro] = useState('todos')
   const [ajustesAbierto, setAjustesAbierto] = useState(false)
   const [panelAbierto, setPanelAbierto] = useState(false)
-  const [metaAbierto, setMetaAbierto] = useState(false)
   const [errorApp, setErrorApp] = useState('')
   const [exito, setExito] = useState(null) // { tipo, monto }
+  const [noti, setNoti] = useState(null) // novedades del otro al entrar
   const backupHecho = useRef(false)
+  const notiChecada = useRef(false)
 
   // Splash mínimo 2 segundos
   useEffect(() => {
@@ -66,16 +66,12 @@ export default function App() {
 
   // Conexión Firebase + escucha en tiempo real
   useEffect(() => {
-    let unsubMov, unsubPer, unsubMeta
+    let unsubMov, unsubPer
     listoFirebase.then(async () => {
       for (const p of PERSONAS) {
         const ref = doc(db, 'personas', p.id)
         const snap = await getDoc(ref)
         if (!snap.exists()) await setDoc(ref, { pin: p.pinDefecto, foto: '' })
-      }
-      const metaRef = doc(db, 'config', 'meta')
-      if (!(await getDoc(metaRef)).exists()) {
-        await setDoc(metaRef, { nombre: 'Nintendo Switch', objetivo: 1500 })
       }
 
       unsubMov = onSnapshot(
@@ -95,16 +91,29 @@ export default function App() {
         snap.docs.forEach((d) => (r[d.id] = d.data()))
         setPerfiles(r)
       })
-      unsubMeta = onSnapshot(doc(db, 'config', 'meta'), (snap) => {
-        if (snap.exists()) setMeta(snap.data())
-      })
     }).catch((e) => {
       setCargando(false)
       setErrorApp('No se pudo conectar a Firebase: ' + e.message +
         '. Revisa que el login Anónimo esté activado en Authentication.')
     })
-    return () => { unsubMov?.(); unsubPer?.(); unsubMeta?.() }
+    return () => { unsubMov?.(); unsubPer?.() }
   }, [])
+
+  // Novedades: al entrar, avisa si el otro guardó/gastó mientras no estabas
+  useEffect(() => {
+    if (!usuario || cargando || notiChecada.current) return
+    notiChecada.current = true
+    const visto = Number(localStorage.getItem('na_visto_' + usuario) || 0)
+    const nuevos = movimientos.filter(
+      (m) => m.creadoPor && m.creadoPor !== usuario && (m.creado || 0) > visto
+    )
+    if (nuevos.length > 0) {
+      const neto = nuevos.reduce((a, m) => a + (m.tipo === 'ingreso' ? m.monto : -m.monto), 0)
+      const otro = PERSONAS.find((p) => p.id !== usuario)
+      setNoti({ nombre: otro.nombre, otroId: otro.id, cantidad: nuevos.length, neto })
+    }
+    localStorage.setItem('na_visto_' + usuario, String(Date.now()))
+  }, [usuario, cargando, movimientos])
 
   const saldos = useMemo(() => {
     const r = {}
@@ -118,15 +127,6 @@ export default function App() {
 
   const total = useMemo(() => Object.values(saldos).reduce((a, b) => a + b, 0), [saldos])
 
-  // Cambio neto de los últimos 7 días
-  const estaSemana = useMemo(() => {
-    const hace7 = Date.now() - 7 * 24 * 60 * 60 * 1000
-    return movimientos.reduce((acc, m) => {
-      if (new Date(m.fecha).getTime() < hace7) return acc
-      return acc + (m.tipo === 'ingreso' ? m.monto : -m.monto)
-    }, 0)
-  }, [movimientos])
-
   const movimientosFiltrados = useMemo(() => {
     const lista = filtro === 'todos' ? movimientos : movimientos.filter((m) => m.persona === filtro)
     return [...lista].sort((a, b) => b.fecha.localeCompare(a.fecha))
@@ -138,7 +138,7 @@ export default function App() {
       if (id) {
         await updateDoc(doc(db, 'movimientos', id), resto)
       } else {
-        await addDoc(collection(db, 'movimientos'), { ...resto, creadoPor: usuario })
+        await addDoc(collection(db, 'movimientos'), { ...resto, creadoPor: usuario, creado: Date.now() })
       }
       setModalAbierto(false)
       setEditando(null)
@@ -165,11 +165,6 @@ export default function App() {
   async function cambiarPin(nuevoPin) {
     await updateDoc(doc(db, 'personas', usuario), { pin: nuevoPin })
     setAjustesAbierto(false)
-  }
-
-  async function guardarMeta(datos) {
-    await setDoc(doc(db, 'config', 'meta'), datos)
-    setMetaAbierto(false)
   }
 
   function entrar(personaId) {
@@ -212,32 +207,10 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tarjeta principal - glassmorphism */}
-      <section className="total-glass">
-        <span className="total-label">💰 Total Ahorrado</span>
+      {/* Tarjeta principal */}
+      <section className="total-card">
+        <span className="total-label">Total juntos</span>
         <span className="total-monto"><Contador valor={total} /></span>
-        <span className={`total-semana ${estaSemana >= 0 ? 'pos' : 'neg'}`}>
-          {estaSemana >= 0 ? '+' : '−'}{soles(Math.abs(estaSemana)).replace('S/ ', 'S/')} esta semana
-        </span>
-      </section>
-
-      {/* Participación */}
-      <section className="participacion">
-        <h2 className="seccion-titulo">Participación</h2>
-        {PERSONAS.map((p) => {
-          const pct = total > 0 ? Math.round((Math.max(saldos[p.id], 0) / total) * 100) : 0
-          return (
-            <div className="part-fila" key={p.id}>
-              <div className="part-top">
-                <span>{p.nombre}</span>
-                <span className="part-pct">{pct}%</span>
-              </div>
-              <div className="part-barra">
-                <div className={`part-relleno ${p.id}`} style={{ width: pct + '%' }} />
-              </div>
-            </div>
-          )
-        })}
       </section>
 
       {/* Perfiles de integrantes */}
@@ -253,9 +226,6 @@ export default function App() {
           />
         ))}
       </section>
-
-      {/* Meta */}
-      <MetaCard meta={meta} total={total} onEditar={() => setMetaAbierto(true)} />
 
       {/* Movimientos */}
       <section className="historial">
@@ -310,13 +280,13 @@ export default function App() {
       {ajustesAbierto && (
         <ModalPin nombre={yo?.nombre} onGuardar={cambiarPin} onCerrar={() => setAjustesAbierto(false)} />
       )}
-      {metaAbierto && (
-        <ModalMeta meta={meta} onGuardar={guardarMeta} onCerrar={() => setMetaAbierto(false)} />
-      )}
       {panelAbierto && (
         <PanelDev movimientos={movimientos} onCerrar={() => setPanelAbierto(false)} />
       )}
       {exito && <AnimacionExito tipo={exito.tipo} monto={exito.monto} />}
+      {noti && (
+        <NotificacionNovedad noti={noti} foto={perfiles[noti.otroId]?.foto} onCerrar={() => setNoti(null)} />
+      )}
     </div>
   )
 }
@@ -424,30 +394,33 @@ function PerfilPersona({ persona, saldo, foto, puedeEditar, onSubirFoto }) {
   )
 }
 
-/* ---------- Meta ---------- */
-function MetaCard({ meta, total, onEditar }) {
-  const pct = meta.objetivo > 0 ? Math.min(Math.round((total / meta.objetivo) * 100), 100) : 0
+/* ---------- Notificación de novedades ---------- */
+function NotificacionNovedad({ noti, foto, onCerrar }) {
+  const positivo = noti.neto >= 0
   return (
-    <section className="meta-card" onClick={onEditar}>
-      <div className="meta-head">
-        <span className="meta-titulo">🎯 Meta Familiar</span>
-        <span className="meta-editar">editar</span>
+    <div className="modal-fondo" onClick={onCerrar}>
+      <div className={`noti-card ${positivo ? 'pos' : 'neg'}`} onClick={(e) => e.stopPropagation()}>
+        <div className={`noti-avatar avatar-${noti.otroId}`} style={foto ? { backgroundImage: `url(${foto})` } : undefined}>
+          {!foto && noti.nombre[0]}
+        </div>
+        <div className="noti-campana">🔔</div>
+        <h3 className="noti-titulo">¡Novedad!</h3>
+        <p className="noti-texto">
+          <b>{noti.nombre}</b> {noti.cantidad === 1 ? 'registró' : `hizo ${noti.cantidad} movimientos por`}{' '}
+          <span className={positivo ? 'noti-monto-pos' : 'noti-monto-neg'}>
+            {positivo ? '+' : '−'}{soles(Math.abs(noti.neto)).replace('S/ ', 'S/')}
+          </span>{' '}
+          mientras no estabas.
+        </p>
+        <button className="btn-primario" onClick={onCerrar}>¡Genial!</button>
       </div>
-      <span className="meta-nombre">{meta.nombre}</span>
-      <div className="meta-barra"><div className="meta-relleno" style={{ width: pct + '%' }} /></div>
-      <div className="meta-pie">
-        <span>{soles(total)} de {soles(meta.objetivo)}</span>
-        <span className="meta-pct">{pct}%</span>
-      </div>
-    </section>
+    </div>
   )
 }
 
 /* ---------- Modal movimiento ---------- */
 function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
-  const [categoria, setCategoria] = useState(
-    inicial?.categoria || (inicial?.tipo === 'gasto' ? 'retiro' : 'ahorro')
-  )
+  const [tipo, setTipo] = useState(inicial?.tipo || 'ingreso')
   const [monto, setMonto] = useState(inicial ? String(inicial.monto) : '')
   const [descripcion, setDescripcion] = useState(inicial?.descripcion || '')
   const [fecha, setFecha] = useState(
@@ -462,8 +435,7 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
     onGuardar({
       id: inicial?.id,
       persona,
-      categoria,
-      tipo: CAT_MAP[categoria].tipo,
+      tipo,
       monto: valor,
       descripcion: descripcion.trim(),
       fecha: new Date(fecha).toISOString(),
@@ -477,15 +449,9 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
         <div className="modal-persona">{PERSONAS.find((p) => p.id === persona)?.nombre}</div>
 
         <label>Tipo</label>
-        <div className="cat-grid">
-          {CATEGORIAS.map((c) => (
-            <button type="button" key={c.id}
-              className={`cat-btn ${categoria === c.id ? 'activo ' + c.tipo : ''}`}
-              onClick={() => setCategoria(c.id)}>
-              <span className="cat-ico">{c.icono}</span>
-              <span>{c.nombre}</span>
-            </button>
-          ))}
+        <div className="segmento">
+          <button type="button" className={tipo === 'ingreso' ? 'seg activo ingreso' : 'seg'} onClick={() => setTipo('ingreso')}>Ahorro (+)</button>
+          <button type="button" className={tipo === 'gasto' ? 'seg activo gasto' : 'seg'} onClick={() => setTipo('gasto')}>Gasto (−)</button>
         </div>
 
         <label>Monto (S/)</label>
@@ -526,33 +492,6 @@ function ModalPin({ nombre, onGuardar, onCerrar }) {
         <label>Repetir PIN</label>
         <input type="password" inputMode="numeric" maxLength={8} value={pin2} onChange={(e) => { setPin2(e.target.value); setError('') }} />
         {error && <span className="error">{error}</span>}
-        <div className="modal-acciones">
-          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
-          <button type="submit" className="btn-primario">Guardar</button>
-        </div>
-      </form>
-    </div>
-  )
-}
-
-/* ---------- Modal Meta ---------- */
-function ModalMeta({ meta, onGuardar, onCerrar }) {
-  const [nombre, setNombre] = useState(meta.nombre)
-  const [objetivo, setObjetivo] = useState(String(meta.objetivo))
-  function submit(e) {
-    e.preventDefault()
-    const obj = parseFloat(objetivo)
-    if (!obj || obj <= 0) { alert('Ingresa un objetivo válido'); return }
-    onGuardar({ nombre: nombre.trim() || 'Nuestra meta', objetivo: obj })
-  }
-  return (
-    <div className="modal-fondo" onClick={onCerrar}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
-        <h3>🎯 Meta Familiar</h3>
-        <label>¿Qué quieren lograr?</label>
-        <input type="text" placeholder="Ej: Nintendo Switch, viaje..." value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus />
-        <label>Monto objetivo (S/)</label>
-        <input type="number" inputMode="decimal" step="0.01" value={objetivo} onChange={(e) => setObjetivo(e.target.value)} />
         <div className="modal-acciones">
           <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
           <button type="submit" className="btn-primario">Guardar</button>
