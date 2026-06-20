@@ -1,0 +1,373 @@
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { db, listoFirebase } from './firebase'
+import {
+  collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc,
+} from 'firebase/firestore'
+
+// Las dos personas de la app. PIN inicial por defecto.
+const PERSONAS = [
+  { id: 'hayllin', nombre: 'Hayllin', pinDefecto: '1111' },
+  { id: 'angel', nombre: 'Angel', pinDefecto: '2222' },
+]
+
+const soles = (n) =>
+  'S/ ' + n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+export default function App() {
+  const [cargando, setCargando] = useState(true)
+  const [movimientos, setMovimientos] = useState([])
+  const [perfiles, setPerfiles] = useState({}) // { hayllin: {pin, foto}, angel: {...} }
+  const [usuario, setUsuario] = useState(() => sessionStorage.getItem('na_usuario') || null)
+
+  const [modalAbierto, setModalAbierto] = useState(false)
+  const [editando, setEditando] = useState(null)
+  const [filtro, setFiltro] = useState('todos')
+  const [ajustesAbierto, setAjustesAbierto] = useState(false)
+
+  // Conexión a Firebase + escucha en tiempo real
+  useEffect(() => {
+    let unsubMov, unsubPer
+    listoFirebase.then(async () => {
+      // Crea los perfiles por defecto si no existen todavía
+      for (const p of PERSONAS) {
+        const ref = doc(db, 'personas', p.id)
+        const snap = await getDoc(ref)
+        if (!snap.exists()) {
+          await setDoc(ref, { pin: p.pinDefecto, foto: '' })
+        }
+      }
+
+      unsubMov = onSnapshot(collection(db, 'movimientos'), (snap) => {
+        setMovimientos(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+        setCargando(false)
+      })
+      unsubPer = onSnapshot(collection(db, 'personas'), (snap) => {
+        const r = {}
+        snap.docs.forEach((d) => (r[d.id] = d.data()))
+        setPerfiles(r)
+      })
+    })
+    return () => { unsubMov?.(); unsubPer?.() }
+  }, [])
+
+  const saldos = useMemo(() => {
+    const r = {}
+    for (const p of PERSONAS) r[p.id] = 0
+    for (const m of movimientos) {
+      if (r[m.persona] === undefined) continue
+      r[m.persona] += m.tipo === 'ingreso' ? m.monto : -m.monto
+    }
+    return r
+  }, [movimientos])
+
+  const total = useMemo(() => Object.values(saldos).reduce((a, b) => a + b, 0), [saldos])
+
+  const movimientosFiltrados = useMemo(() => {
+    const lista = filtro === 'todos' ? movimientos : movimientos.filter((m) => m.persona === filtro)
+    return [...lista].sort((a, b) => b.fecha.localeCompare(a.fecha))
+  }, [movimientos, filtro])
+
+  async function guardarMovimiento(mov) {
+    if (mov.id) {
+      const { id, ...resto } = mov
+      await updateDoc(doc(db, 'movimientos', id), resto)
+    } else {
+      await addDoc(collection(db, 'movimientos'), { ...mov, creadoPor: usuario })
+    }
+    setModalAbierto(false)
+    setEditando(null)
+  }
+
+  async function borrarMovimiento(id) {
+    if (confirm('¿Borrar este movimiento?')) {
+      await deleteDoc(doc(db, 'movimientos', id))
+    }
+  }
+
+  function subirFoto(personaId, file) {
+    const reader = new FileReader()
+    reader.onload = () => updateDoc(doc(db, 'personas', personaId), { foto: reader.result })
+    reader.readAsDataURL(file)
+  }
+
+  async function cambiarPin(nuevoPin) {
+    await updateDoc(doc(db, 'personas', usuario), { pin: nuevoPin })
+    setAjustesAbierto(false)
+  }
+
+  function entrar(personaId) {
+    setUsuario(personaId)
+    sessionStorage.setItem('na_usuario', personaId)
+  }
+
+  function salir() {
+    setUsuario(null)
+    sessionStorage.removeItem('na_usuario')
+  }
+
+  if (cargando) {
+    return <div className="centro">Cargando…</div>
+  }
+
+  if (!usuario) {
+    return <Login perfiles={perfiles} onEntrar={entrar} />
+  }
+
+  const yo = PERSONAS.find((p) => p.id === usuario)
+
+  return (
+    <div className={`app tema-${usuario}`}>
+      <header className="cabecera">
+        <div className="cab-fila">
+          <div>
+            <h1>Nuestros Ahorros</h1>
+            <p className="sub">Hola, {yo?.nombre} 👋</p>
+          </div>
+          <div className="cab-botones">
+            <button className="icono-btn" onClick={() => setAjustesAbierto(true)} title="Cambiar PIN">⚙️</button>
+            <button className="icono-btn" onClick={salir} title="Salir">🚪</button>
+          </div>
+        </div>
+      </header>
+
+      <section className="total-card">
+        <span className="total-label">Total juntos</span>
+        <span className="total-monto">{soles(total)}</span>
+      </section>
+
+      <section className="personas">
+        {PERSONAS.map((p) => (
+          <TarjetaPersona
+            key={p.id}
+            persona={p}
+            saldo={saldos[p.id]}
+            foto={perfiles[p.id]?.foto}
+            puedeEditar={p.id === usuario}
+            onSubirFoto={(file) => subirFoto(p.id, file)}
+          />
+        ))}
+      </section>
+
+      <section className="historial">
+        <div className="historial-head">
+          <h2>Movimientos</h2>
+          <div className="filtros">
+            <button className={filtro === 'todos' ? 'chip activo' : 'chip'} onClick={() => setFiltro('todos')}>Todos</button>
+            {PERSONAS.map((p) => (
+              <button key={p.id} className={filtro === p.id ? 'chip activo' : 'chip'} onClick={() => setFiltro(p.id)}>
+                {p.nombre}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {movimientosFiltrados.length === 0 ? (
+          <p className="vacio">Aún no hay movimientos. Toca el botón + para agregar uno.</p>
+        ) : (
+          <ul className="lista">
+            {movimientosFiltrados.map((m) => {
+              const persona = PERSONAS.find((p) => p.id === m.persona)
+              return (
+                <li key={m.id} className="item">
+                  <div className={`punto ${m.tipo}`} />
+                  <div className="item-info">
+                    <span className="item-desc">{m.descripcion || (m.tipo === 'ingreso' ? 'Ahorro' : 'Gasto')}</span>
+                    <span className="item-meta">{persona?.nombre} · {new Date(m.fecha).toLocaleDateString('es-PE')}</span>
+                  </div>
+                  <span className={`item-monto ${m.tipo}`}>{m.tipo === 'ingreso' ? '+' : '−'} {soles(m.monto)}</span>
+                  <div className="item-acciones">
+                    <button onClick={() => { setEditando(m); setModalAbierto(true) }}>✏️</button>
+                    <button onClick={() => borrarMovimiento(m.id)}>🗑️</button>
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </section>
+
+      <button className="fab" onClick={() => { setEditando(null); setModalAbierto(true) }}>+</button>
+
+      {modalAbierto && (
+        <ModalMovimiento
+          inicial={editando}
+          usuario={usuario}
+          onGuardar={guardarMovimiento}
+          onCerrar={() => { setModalAbierto(false); setEditando(null) }}
+        />
+      )}
+
+      {ajustesAbierto && (
+        <ModalPin nombre={yo?.nombre} onGuardar={cambiarPin} onCerrar={() => setAjustesAbierto(false)} />
+      )}
+    </div>
+  )
+}
+
+function Login({ perfiles, onEntrar }) {
+  const [seleccion, setSeleccion] = useState(null)
+  const [pin, setPin] = useState('')
+  const [error, setError] = useState('')
+
+  function intentar(e) {
+    e.preventDefault()
+    const correcto = perfiles[seleccion]?.pin ||
+      PERSONAS.find((p) => p.id === seleccion)?.pinDefecto
+    if (pin === correcto) {
+      onEntrar(seleccion)
+    } else {
+      setError('PIN incorrecto')
+      setPin('')
+    }
+  }
+
+  if (!seleccion) {
+    return (
+      <div className="login">
+        <h1>Nuestros Ahorros</h1>
+        <p className="sub">¿Quién entra?</p>
+        <div className="login-personas">
+          {PERSONAS.map((p) => (
+            <button key={p.id} className="login-persona" onClick={() => setSeleccion(p.id)}>
+              <div className={`login-avatar avatar-${p.id}`} style={perfiles[p.id]?.foto ? { backgroundImage: `url(${perfiles[p.id].foto})` } : undefined}>
+                {!perfiles[p.id]?.foto && p.nombre[0]}
+              </div>
+              <span>{p.nombre}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  const persona = PERSONAS.find((p) => p.id === seleccion)
+  return (
+    <form className={`login tema-${seleccion}`} onSubmit={intentar}>
+      <h1>Hola, {persona.nombre}</h1>
+      <p className="sub">Ingresa tu PIN</p>
+      <input
+        className="pin-input"
+        type="password"
+        inputMode="numeric"
+        maxLength={8}
+        value={pin}
+        autoFocus
+        onChange={(e) => { setPin(e.target.value); setError('') }}
+        placeholder="••••"
+      />
+      {error && <span className="error">{error}</span>}
+      <button type="submit" className="btn-primario">Entrar</button>
+      <button type="button" className="btn-texto" onClick={() => { setSeleccion(null); setPin(''); setError('') }}>
+        ← Volver
+      </button>
+    </form>
+  )
+}
+
+function TarjetaPersona({ persona, saldo, foto, puedeEditar, onSubirFoto }) {
+  const inputRef = useRef(null)
+  return (
+    <div className={`persona-card persona-${persona.id}`} style={foto ? { backgroundImage: `url(${foto})` } : undefined}>
+      <div className="persona-overlay" />
+      <div className="persona-contenido">
+        <div className="persona-top">
+          <span className="persona-nombre">{persona.nombre}</span>
+          {puedeEditar && <button className="btn-foto" onClick={() => inputRef.current?.click()}>📷</button>}
+        </div>
+        <span className="persona-label">Ahorro</span>
+        <span className="persona-saldo">{soles(saldo)}</span>
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" hidden
+        onChange={(e) => e.target.files[0] && onSubirFoto(e.target.files[0])} />
+    </div>
+  )
+}
+
+function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
+  const [persona, setPersona] = useState(inicial?.persona || usuario)
+  const [tipo, setTipo] = useState(inicial?.tipo || 'ingreso')
+  const [monto, setMonto] = useState(inicial ? String(inicial.monto) : '')
+  const [descripcion, setDescripcion] = useState(inicial?.descripcion || '')
+  const [fecha, setFecha] = useState(
+    inicial?.fecha ? inicial.fecha.slice(0, 10) : new Date().toISOString().slice(0, 10)
+  )
+
+  function submit(e) {
+    e.preventDefault()
+    const valor = parseFloat(monto)
+    if (!valor || valor <= 0) { alert('Ingresa un monto válido'); return }
+    onGuardar({
+      id: inicial?.id,
+      persona, tipo, monto: valor,
+      descripcion: descripcion.trim(),
+      fecha: new Date(fecha).toISOString(),
+    })
+  }
+
+  return (
+    <div className="modal-fondo" onClick={onCerrar}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h3>{inicial ? 'Editar movimiento' : 'Nuevo movimiento'}</h3>
+
+        <label>¿De quién?</label>
+        <div className="segmento">
+          {PERSONAS.map((p) => (
+            <button type="button" key={p.id} className={persona === p.id ? 'seg activo' : 'seg'} onClick={() => setPersona(p.id)}>
+              {p.nombre}
+            </button>
+          ))}
+        </div>
+
+        <label>Tipo</label>
+        <div className="segmento">
+          <button type="button" className={tipo === 'ingreso' ? 'seg activo ingreso' : 'seg'} onClick={() => setTipo('ingreso')}>Ahorro (+)</button>
+          <button type="button" className={tipo === 'gasto' ? 'seg activo gasto' : 'seg'} onClick={() => setTipo('gasto')}>Gasto (−)</button>
+        </div>
+
+        <label>Monto (S/)</label>
+        <input type="number" inputMode="decimal" step="0.01" placeholder="0.00" value={monto} onChange={(e) => setMonto(e.target.value)} autoFocus />
+
+        <label>Descripción (opcional)</label>
+        <input type="text" placeholder="Ej: mercado, sueldo..." value={descripcion} onChange={(e) => setDescripcion(e.target.value)} />
+
+        <label>Fecha</label>
+        <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+
+        <div className="modal-acciones">
+          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primario">Guardar</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+function ModalPin({ nombre, onGuardar, onCerrar }) {
+  const [pin1, setPin1] = useState('')
+  const [pin2, setPin2] = useState('')
+  const [error, setError] = useState('')
+
+  function submit(e) {
+    e.preventDefault()
+    if (pin1.length < 4) { setError('El PIN debe tener al menos 4 dígitos'); return }
+    if (pin1 !== pin2) { setError('Los PIN no coinciden'); return }
+    onGuardar(pin1)
+  }
+
+  return (
+    <div className="modal-fondo" onClick={onCerrar}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h3>Cambiar PIN de {nombre}</h3>
+        <label>Nuevo PIN</label>
+        <input type="password" inputMode="numeric" maxLength={8} value={pin1} onChange={(e) => { setPin1(e.target.value); setError('') }} autoFocus />
+        <label>Repetir PIN</label>
+        <input type="password" inputMode="numeric" maxLength={8} value={pin2} onChange={(e) => { setPin2(e.target.value); setError('') }} />
+        {error && <span className="error">{error}</span>}
+        <div className="modal-acciones">
+          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primario">Guardar</button>
+        </div>
+      </form>
+    </div>
+  )
+}
