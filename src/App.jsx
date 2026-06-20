@@ -24,6 +24,30 @@ const iconoMov = (m) => CAT_MAP[m.categoria]?.icono || (m.tipo === 'ingreso' ? '
 const soles = (n) =>
   'S/ ' + Number(n).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+// Redimensiona y comprime una imagen para que quepa en Firestore (<1MB por documento)
+function comprimirImagen(file, maxLado = 700, calidad = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const img = new Image()
+      img.onload = () => {
+        let { width, height } = img
+        if (width > height && width > maxLado) { height = (height * maxLado) / width; width = maxLado }
+        else if (height > maxLado) { width = (width * maxLado) / height; height = maxLado }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/jpeg', calidad))
+      }
+      img.onerror = reject
+      img.src = reader.result
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 // ---- Datos / backups ----
 async function leerTodo() {
   const movs = (await getDocs(collection(db, 'movimientos'))).docs.map((d) => ({ id: d.id, ...d.data() }))
@@ -156,10 +180,13 @@ export default function App() {
     if (confirm('¿Borrar este movimiento?')) await deleteDoc(doc(db, 'movimientos', id))
   }
 
-  function subirFoto(personaId, file) {
-    const reader = new FileReader()
-    reader.onload = () => updateDoc(doc(db, 'personas', personaId), { foto: reader.result })
-    reader.readAsDataURL(file)
+  async function subirFoto(personaId, file) {
+    try {
+      const foto = await comprimirImagen(file)
+      await updateDoc(doc(db, 'personas', personaId), { foto })
+    } catch (e) {
+      alert('No se pudo actualizar la foto: ' + e.message)
+    }
   }
 
   async function cambiarPin(nuevoPin) {
