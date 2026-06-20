@@ -375,6 +375,7 @@ body {
 .btn-secundario { background: var(--glass); color: var(--tenue); border: 1px solid var(--glass-borde); }
 .btn-primario { background: linear-gradient(135deg, var(--verde), #2bd9a0); color: #0F0B1E; }
 .btn-secundario:active, .btn-primario:active { transform: scale(0.96); }
+.btn-primario:disabled, .btn-secundario:disabled { opacity: 0.55; transform: none; cursor: default; }
 .login .btn-primario { flex: 0 0 auto; width: auto; min-width: 150px; padding: 13px 30px; font-size: 15px; margin-top: 4px; }
 
 /* Animación de éxito */

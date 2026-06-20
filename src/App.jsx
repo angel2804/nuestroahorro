@@ -45,7 +45,7 @@ export default function App() {
   const [splash, setSplash] = useState(true)
   const [movimientos, setMovimientos] = useState([])
   const [perfiles, setPerfiles] = useState({})
-  const [usuario, setUsuario] = useState(() => sessionStorage.getItem('na_usuario') || null)
+  const [usuario, setUsuario] = useState(null) // en memoria: al cerrar la app se cierra sesión
 
   const [modalAbierto, setModalAbierto] = useState(false)
   const [editando, setEditando] = useState(null)
@@ -169,11 +169,10 @@ export default function App() {
 
   function entrar(personaId) {
     setUsuario(personaId)
-    sessionStorage.setItem('na_usuario', personaId)
   }
   function salir() {
     setUsuario(null)
-    sessionStorage.removeItem('na_usuario')
+    notiChecada.current = false
   }
 
   if (splash || cargando) return <Splash />
@@ -428,13 +427,16 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
   const [fecha, setFecha] = useState(
     inicial?.fecha ? inicial.fecha.slice(0, 10) : new Date().toISOString().slice(0, 10)
   )
+  const [enviando, setEnviando] = useState(false)
   const persona = inicial?.persona || usuario
 
-  function submit(e) {
+  async function submit(e) {
     e.preventDefault()
+    if (enviando) return
     const valor = parseFloat(monto)
     if (!valor || valor <= 0) { alert('Ingresa un monto válido'); return }
-    onGuardar({
+    setEnviando(true)
+    await onGuardar({
       id: inicial?.id,
       persona,
       tipo,
@@ -442,6 +444,7 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
       descripcion: descripcion.trim(),
       fecha: new Date(fecha).toISOString(),
     })
+    setEnviando(false)
   }
 
   return (
@@ -466,8 +469,8 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
         <input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
 
         <div className="modal-acciones">
-          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
-          <button type="submit" className="btn-primario">Guardar</button>
+          <button type="button" className="btn-secundario" onClick={onCerrar} disabled={enviando}>Cancelar</button>
+          <button type="submit" className="btn-primario" disabled={enviando}>{enviando ? 'Guardando…' : 'Guardar'}</button>
         </div>
       </form>
     </div>
