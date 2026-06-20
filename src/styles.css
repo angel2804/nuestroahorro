@@ -291,3 +291,46 @@ body {
 .avatar-angel { border-color: var(--verde); }
 .btn-texto { background: none; border: none; color: var(--tenue); cursor: pointer; font-size: 14px; }
 .error { color: var(--rojo); font-size: 14px; }
+
+/* Banner de error */
+.banner-error {
+  background: #7f1d1d;
+  color: #fecaca;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  margin-bottom: 14px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.banner-x { opacity: 0.7; font-size: 11px; }
+
+/* Panel Dev */
+.panel { max-height: 85vh; overflow-y: auto; }
+.panel-info { color: var(--tenue); font-size: 13px; line-height: 1.6; margin: 6px 0; }
+.panel-acciones { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.panel-acciones button { flex: none; }
+.panel-estado { color: var(--verde); font-size: 13px; margin-top: 10px; }
+.panel-titulo { margin-top: 18px; margin-bottom: 8px; font-size: 15px; }
+.panel-lista { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.panel-lista li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg);
+  padding: 10px 14px;
+  border-radius: 12px;
+}
+.panel-lista li > div { display: flex; flex-direction: column; }
+.bk-fecha { font-weight: 600; font-size: 14px; }
+.bk-meta { font-size: 12px; color: var(--tenue); }
+.btn-restaurar {
+  background: var(--acento);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}

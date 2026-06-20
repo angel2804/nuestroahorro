@@ -1,8 +1,26 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { db, listoFirebase } from './firebase'
 import {
-  collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc,
+  collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs,
 } from 'firebase/firestore'
+
+// Lee TODOS los datos actuales (para backups y descargas)
+async function leerTodo() {
+  const movs = (await getDocs(collection(db, 'movimientos'))).docs.map((d) => ({ id: d.id, ...d.data() }))
+  const personas = {}
+  ;(await getDocs(collection(db, 'personas'))).docs.forEach((d) => (personas[d.id] = d.data()))
+  return { movimientos: movs, personas }
+}
+
+// Guarda una "foto" de los datos del día en la colección backups/{fecha}, una vez por día.
+async function backupDiario() {
+  const hoy = new Date().toISOString().slice(0, 10)
+  const ref = doc(db, 'backups', hoy)
+  const snap = await getDoc(ref)
+  if (snap.exists()) return // ya se hizo hoy
+  const datos = await leerTodo()
+  await setDoc(ref, { fecha: new Date().toISOString(), ...datos })
+}
 
 // Las dos personas de la app. PIN inicial por defecto.
 const PERSONAS = [
@@ -23,6 +41,9 @@ export default function App() {
   const [editando, setEditando] = useState(null)
   const [filtro, setFiltro] = useState('todos')
   const [ajustesAbierto, setAjustesAbierto] = useState(false)
+  const [panelAbierto, setPanelAbierto] = useState(false)
+  const [errorApp, setErrorApp] = useState('')
+  const backupHecho = useRef(false)
 
   // Conexión a Firebase + escucha en tiempo real
   useEffect(() => {
@@ -37,15 +58,27 @@ export default function App() {
         }
       }
 
-      unsubMov = onSnapshot(collection(db, 'movimientos'), (snap) => {
-        setMovimientos(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
-        setCargando(false)
-      })
+      unsubMov = onSnapshot(
+        collection(db, 'movimientos'),
+        (snap) => {
+          setMovimientos(snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+          setCargando(false)
+          if (!backupHecho.current) {
+            backupHecho.current = true
+            backupDiario().catch((e) => console.error('Error en backup diario:', e))
+          }
+        },
+        (e) => setErrorApp('No se pudo leer la base de datos: ' + e.message)
+      )
       unsubPer = onSnapshot(collection(db, 'personas'), (snap) => {
         const r = {}
         snap.docs.forEach((d) => (r[d.id] = d.data()))
         setPerfiles(r)
       })
+    }).catch((e) => {
+      setCargando(false)
+      setErrorApp('No se pudo conectar a Firebase: ' + e.message +
+        '. Revisa que el login Anónimo esté activado en Authentication.')
     })
     return () => { unsubMov?.(); unsubPer?.() }
   }, [])
@@ -68,14 +101,19 @@ export default function App() {
   }, [movimientos, filtro])
 
   async function guardarMovimiento(mov) {
-    if (mov.id) {
-      const { id, ...resto } = mov
-      await updateDoc(doc(db, 'movimientos', id), resto)
-    } else {
-      await addDoc(collection(db, 'movimientos'), { ...mov, creadoPor: usuario })
+    try {
+      if (mov.id) {
+        const { id, ...resto } = mov
+        await updateDoc(doc(db, 'movimientos', id), resto)
+      } else {
+        await addDoc(collection(db, 'movimientos'), { ...mov, creadoPor: usuario })
+      }
+      setModalAbierto(false)
+      setEditando(null)
+    } catch (e) {
+      alert('No se pudo guardar: ' + e.message +
+        '\n\nRevisa las reglas de Firestore y que el login Anónimo esté activado.')
     }
-    setModalAbierto(false)
-    setEditando(null)
   }
 
   async function borrarMovimiento(id) {
@@ -117,6 +155,11 @@ export default function App() {
 
   return (
     <div className={`app tema-${usuario}`}>
+      {errorApp && (
+        <div className="banner-error" onClick={() => setErrorApp('')}>
+          ⚠️ {errorApp} <span className="banner-x">(tocar para cerrar)</span>
+        </div>
+      )}
       <header className="cabecera">
         <div className="cab-fila">
           <div>
@@ -124,6 +167,9 @@ export default function App() {
             <p className="sub">Hola, {yo?.nombre} 👋</p>
           </div>
           <div className="cab-botones">
+            {usuario === 'angel' && (
+              <button className="icono-btn" onClick={() => setPanelAbierto(true)} title="Panel Dev">🛠️</button>
+            )}
             <button className="icono-btn" onClick={() => setAjustesAbierto(true)} title="Cambiar PIN">⚙️</button>
             <button className="icono-btn" onClick={salir} title="Salir">🚪</button>
           </div>
@@ -200,6 +246,105 @@ export default function App() {
       {ajustesAbierto && (
         <ModalPin nombre={yo?.nombre} onGuardar={cambiarPin} onCerrar={() => setAjustesAbierto(false)} />
       )}
+
+      {panelAbierto && (
+        <PanelDev movimientos={movimientos} onCerrar={() => setPanelAbierto(false)} />
+      )}
+    </div>
+  )
+}
+
+function PanelDev({ movimientos, onCerrar }) {
+  const [backups, setBackups] = useState([])
+  const [estado, setEstado] = useState('')
+  const [cargandoLista, setCargandoLista] = useState(true)
+
+  async function cargarBackups() {
+    setCargandoLista(true)
+    const snap = await getDocs(collection(db, 'backups'))
+    const lista = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => b.id.localeCompare(a.id))
+    setBackups(lista)
+    setCargandoLista(false)
+  }
+
+  useEffect(() => { cargarBackups() }, [])
+
+  async function crearBackupAhora() {
+    setEstado('Creando backup…')
+    const hoy = new Date().toISOString().slice(0, 10)
+    const datos = await leerTodo()
+    await setDoc(doc(db, 'backups', hoy), { fecha: new Date().toISOString(), ...datos })
+    setEstado('✅ Backup de hoy guardado')
+    cargarBackups()
+  }
+
+  async function descargarTodo() {
+    const datos = await leerTodo()
+    const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ahorros-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function restaurar(backup) {
+    if (!confirm(`¿Restaurar el backup del ${backup.id}? Esto reemplazará TODOS los movimientos actuales.`)) return
+    setEstado('Restaurando…')
+    // Borra movimientos actuales
+    const actuales = await getDocs(collection(db, 'movimientos'))
+    await Promise.all(actuales.docs.map((d) => deleteDoc(doc(db, 'movimientos', d.id))))
+    // Reinserta los del backup
+    await Promise.all(
+      (backup.movimientos || []).map(({ id, ...m }) => setDoc(doc(db, 'movimientos', id), m))
+    )
+    // Restaura perfiles (PIN y fotos)
+    for (const [pid, datos] of Object.entries(backup.personas || {})) {
+      await setDoc(doc(db, 'personas', pid), datos)
+    }
+    setEstado(`✅ Restaurado el backup del ${backup.id}`)
+  }
+
+  return (
+    <div className="modal-fondo" onClick={onCerrar}>
+      <div className="modal panel" onClick={(e) => e.stopPropagation()}>
+        <h3>🛠️ Panel Dev — Angel</h3>
+        <p className="panel-info">
+          Movimientos actuales: <b>{movimientos.length}</b><br />
+          Backup automático: <b>1 vez al día</b> al abrir la app.
+        </p>
+
+        <div className="panel-acciones">
+          <button className="btn-primario" onClick={crearBackupAhora}>Crear backup ahora</button>
+          <button className="btn-secundario" onClick={descargarTodo}>Descargar todo (.json)</button>
+        </div>
+
+        {estado && <p className="panel-estado">{estado}</p>}
+
+        <h4 className="panel-titulo">Backups en la nube</h4>
+        {cargandoLista ? (
+          <p className="panel-info">Cargando…</p>
+        ) : backups.length === 0 ? (
+          <p className="panel-info">Aún no hay backups.</p>
+        ) : (
+          <ul className="panel-lista">
+            {backups.map((b) => (
+              <li key={b.id}>
+                <div>
+                  <span className="bk-fecha">{b.id}</span>
+                  <span className="bk-meta">{(b.movimientos || []).length} movimientos</span>
+                </div>
+                <button className="btn-restaurar" onClick={() => restaurar(b)}>Restaurar</button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <button className="btn-secundario" style={{ marginTop: 16 }} onClick={onCerrar}>Cerrar</button>
+      </div>
     </div>
   )
 }

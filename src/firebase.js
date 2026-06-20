@@ -18,6 +18,8 @@ export const db = getFirestore(app)
 export const auth = getAuth(app)
 
 // Login anónimo: protege los datos pero sin que ustedes tengan que crear cuentas.
+// Si falla (p. ej. login anónimo no activado), relanzamos el error para mostrarlo en pantalla.
 export const listoFirebase = signInAnonymously(auth).catch((e) => {
   console.error('Error iniciando sesión en Firebase:', e)
+  throw e
 })
