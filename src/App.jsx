@@ -102,11 +102,11 @@ export default function App() {
 
   async function guardarMovimiento(mov) {
     try {
-      if (mov.id) {
-        const { id, ...resto } = mov
+      const { id, ...resto } = mov
+      if (id) {
         await updateDoc(doc(db, 'movimientos', id), resto)
       } else {
-        await addDoc(collection(db, 'movimientos'), { ...mov, creadoPor: usuario })
+        await addDoc(collection(db, 'movimientos'), { ...resto, creadoPor: usuario })
       }
       setModalAbierto(false)
       setEditando(null)
