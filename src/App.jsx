@@ -43,6 +43,7 @@ export default function App() {
   const [ajustesAbierto, setAjustesAbierto] = useState(false)
   const [panelAbierto, setPanelAbierto] = useState(false)
   const [errorApp, setErrorApp] = useState('')
+  const [exito, setExito] = useState(null) // 'ingreso' | 'gasto' al guardar
   const backupHecho = useRef(false)
 
   // Conexión a Firebase + escucha en tiempo real
@@ -110,6 +111,8 @@ export default function App() {
       }
       setModalAbierto(false)
       setEditando(null)
+      setExito(resto.tipo)
+      setTimeout(() => setExito(null), 1500)
     } catch (e) {
       alert('No se pudo guardar: ' + e.message +
         '\n\nRevisa las reglas de Firestore y que el login Anónimo esté activado.')
@@ -144,7 +147,7 @@ export default function App() {
   }
 
   if (cargando) {
-    return <div className="centro">Cargando…</div>
+    return <PantallaCarga />
   }
 
   if (!usuario) {
@@ -163,7 +166,7 @@ export default function App() {
       <header className="cabecera">
         <div className="cab-fila">
           <div>
-            <h1>Nuestros Ahorros</h1>
+            <h1 className="titulo-app">Nuestros<span>Ahorros</span></h1>
             <p className="sub">Hola, {yo?.nombre} 👋</p>
           </div>
           <div className="cab-botones">
@@ -250,6 +253,34 @@ export default function App() {
       {panelAbierto && (
         <PanelDev movimientos={movimientos} onCerrar={() => setPanelAbierto(false)} />
       )}
+
+      {exito && <AnimacionExito tipo={exito} />}
+    </div>
+  )
+}
+
+function PantallaCarga() {
+  return (
+    <div className="carga">
+      <div className="carga-moneda">
+        <div className="moneda">S/</div>
+      </div>
+      <h1 className="titulo-app titulo-carga">Nuestros<span>Ahorros</span></h1>
+      <div className="carga-puntos"><i></i><i></i><i></i></div>
+    </div>
+  )
+}
+
+function AnimacionExito({ tipo }) {
+  return (
+    <div className="exito-fondo">
+      <div className={`exito-circulo ${tipo}`}>
+        <svg viewBox="0 0 52 52" className="exito-check">
+          <path d="M14 27 l8 8 l16 -16" fill="none" stroke="white" strokeWidth="5"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <span className="exito-texto">{tipo === 'ingreso' ? '¡Ahorro guardado!' : 'Gasto registrado'}</span>
     </div>
   )
 }

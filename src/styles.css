@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700;800&display=swap');
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
@@ -13,8 +15,12 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg);
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(244,114,182,0.12), transparent 40%),
+    radial-gradient(circle at 85% 100%, rgba(52,211,153,0.12), transparent 40%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--texto);
   -webkit-font-smoothing: antialiased;
 }
@@ -26,13 +32,32 @@ body {
 .app {
   max-width: 480px;
   margin: 0 auto;
-  padding: 20px 16px 100px;
+  padding: 20px 16px 110px;
   min-height: 100vh;
+  animation: entrarApp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes entrarApp {
+  from { opacity: 0; transform: scale(1.06); filter: blur(6px); }
+  to { opacity: 1; transform: scale(1); filter: blur(0); }
 }
 
-.cabecera { text-align: center; margin-bottom: 20px; }
-.cabecera h1 { font-size: 24px; font-weight: 700; }
+.cabecera { margin-bottom: 20px; }
 .sub { color: var(--tenue); font-size: 14px; margin-top: 2px; }
+
+/* Título "NuestrosAhorros" con degradado rosa-verde */
+.titulo-app {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.titulo-app span {
+  background: linear-gradient(90deg, var(--rosa), var(--verde));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-left: 6px;
+}
 
 /* Total */
 .total-card {
@@ -118,6 +143,11 @@ body {
   background: var(--card);
   padding: 12px 14px;
   border-radius: 14px;
+  animation: entrarItem 0.35s ease both;
+}
+@keyframes entrarItem {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .punto { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .punto.ingreso { background: var(--verde); }
@@ -137,15 +167,27 @@ body {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  width: 60px; height: 60px;
+  width: 62px; height: 62px;
   border-radius: 50%;
   border: none;
   background: var(--acento);
   color: white;
-  font-size: 30px;
+  font-size: 32px;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(99,102,241,0.5);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.4), 0 0 0 0 var(--acento);
+  transition: transform 0.15s, box-shadow 0.2s;
+  animation: pulsoFab 2.4s ease-in-out infinite;
 }
+.fab:active { transform: translateX(-50%) scale(0.9); }
+@keyframes pulsoFab {
+  0%, 100% { box-shadow: 0 8px 28px rgba(0,0,0,0.4); }
+  50% { box-shadow: 0 8px 28px rgba(0,0,0,0.4), 0 0 22px var(--acento); }
+}
+.total-card { animation: aparecer 0.6s 0.1s both; }
+.persona-card { transition: transform 0.15s; }
+.persona-card:active { transform: scale(0.97); }
+.btn-primario, .btn-restaurar, .seg, .chip, .icono-btn { transition: transform 0.12s, filter 0.15s; }
+.btn-primario:active, .btn-restaurar:active, .seg:active, .chip:active, .icono-btn:active { transform: scale(0.94); }
 
 /* Modal */
 .modal-fondo {
@@ -241,8 +283,15 @@ body {
   justify-content: center;
   gap: 14px;
   text-align: center;
+  animation: entrarLogin 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.login h1 { font-size: 26px; }
+@keyframes entrarLogin {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+.login h1 { font-size: 28px; font-weight: 800; }
+.login-avatar { transition: transform 0.2s; }
+.login-persona:active .login-avatar { transform: scale(0.92); }
 .login-personas { display: flex; gap: 24px; margin-top: 20px; }
 .login-persona {
   background: none;
@@ -291,6 +340,85 @@ body {
 .avatar-angel { border-color: var(--verde); }
 .btn-texto { background: none; border: none; color: var(--tenue); cursor: pointer; font-size: 14px; }
 .error { color: var(--rojo); font-size: 14px; }
+
+/* Pantalla de carga */
+.carga {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+}
+.carga-moneda { perspective: 600px; }
+.moneda {
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--rosa), var(--verde));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  font-weight: 800;
+  color: #1a1420;
+  box-shadow: 0 10px 30px rgba(244,114,182,0.4);
+  animation: girarMoneda 1.6s ease-in-out infinite;
+}
+@keyframes girarMoneda {
+  0% { transform: rotateY(0); }
+  50% { transform: rotateY(180deg) scale(1.08); }
+  100% { transform: rotateY(360deg); }
+}
+.titulo-carga { font-size: 30px; animation: aparecer 0.8s ease; }
+@keyframes aparecer { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.carga-puntos { display: flex; gap: 8px; }
+.carga-puntos i {
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--tenue);
+  animation: rebote 1s ease-in-out infinite;
+}
+.carga-puntos i:nth-child(2) { animation-delay: 0.15s; background: var(--rosa); }
+.carga-puntos i:nth-child(3) { animation-delay: 0.3s; background: var(--verde); }
+@keyframes rebote { 0%, 100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-10px); opacity: 1; } }
+
+/* Animación de éxito al guardar */
+.exito-fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(26,20,32,0.55);
+  backdrop-filter: blur(3px);
+  animation: aparecer 0.2s ease;
+}
+.exito-circulo {
+  width: 110px; height: 110px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: popIn 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.exito-circulo.ingreso { background: var(--verde); box-shadow: 0 0 50px rgba(52,211,153,0.7); }
+.exito-circulo.gasto { background: var(--rosa); box-shadow: 0 0 50px rgba(244,114,182,0.7); }
+@keyframes popIn {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+.exito-check { width: 64px; height: 64px; }
+.exito-check path {
+  stroke-dasharray: 50;
+  stroke-dashoffset: 50;
+  animation: dibujarCheck 0.5s 0.25s ease forwards;
+}
+@keyframes dibujarCheck { to { stroke-dashoffset: 0; } }
+.exito-texto { color: white; font-weight: 700; font-size: 17px; animation: aparecer 0.4s 0.3s both; }
 
 /* Banner de error */
 .banner-error {
