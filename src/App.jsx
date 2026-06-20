@@ -224,10 +224,12 @@ export default function App() {
                     <span className="item-meta">{persona?.nombre} · {new Date(m.fecha).toLocaleDateString('es-PE')}</span>
                   </div>
                   <span className={`item-monto ${m.tipo}`}>{m.tipo === 'ingreso' ? '+' : '−'} {soles(m.monto)}</span>
-                  <div className="item-acciones">
-                    <button onClick={() => { setEditando(m); setModalAbierto(true) }}>✏️</button>
-                    <button onClick={() => borrarMovimiento(m.id)}>🗑️</button>
-                  </div>
+                  {m.persona === usuario && (
+                    <div className="item-acciones">
+                      <button className="btn-mini" onClick={() => { setEditando(m); setModalAbierto(true) }}>Editar</button>
+                      <button className="btn-mini borrar" onClick={() => borrarMovimiento(m.id)}>Borrar</button>
+                    </div>
+                  )}
                 </li>
               )
             })}
@@ -485,13 +487,8 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
       <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{inicial ? 'Editar movimiento' : 'Nuevo movimiento'}</h3>
 
-        <label>¿De quién?</label>
-        <div className="segmento">
-          {PERSONAS.map((p) => (
-            <button type="button" key={p.id} className={persona === p.id ? 'seg activo' : 'seg'} onClick={() => setPersona(p.id)}>
-              {p.nombre}
-            </button>
-          ))}
+        <div className="modal-persona">
+          {PERSONAS.find((p) => p.id === persona)?.nombre}
         </div>
 
         <label>Tipo</label>
