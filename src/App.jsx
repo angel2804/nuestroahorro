@@ -380,14 +380,16 @@ function Login({ perfiles, onEntrar }) {
 function PerfilPersona({ persona, saldo, foto, puedeEditar, onSubirFoto }) {
   const inputRef = useRef(null)
   return (
-    <div className={`perfil perfil-${persona.id}`}>
-      <button className={`perfil-avatar avatar-${persona.id}`} onClick={() => puedeEditar && inputRef.current?.click()}
-        style={foto ? { backgroundImage: `url(${foto})` } : undefined}>
-        {!foto && persona.nombre[0]}
-        {puedeEditar && <span className="perfil-cam">📷</span>}
-      </button>
-      <span className="perfil-nombre">{persona.nombre}</span>
-      <span className={`perfil-saldo ${persona.id}`}>{soles(saldo)}</span>
+    <div className={`perfil perfil-${persona.id} ${foto ? 'con-foto' : ''}`}
+      style={foto ? { backgroundImage: `url(${foto})` } : undefined}>
+      <div className="perfil-overlay" />
+      <div className="perfil-contenido">
+        {puedeEditar && (
+          <button className="perfil-cam" onClick={() => inputRef.current?.click()}>📷</button>
+        )}
+        <span className="perfil-nombre">{persona.nombre}</span>
+        <span className={`perfil-saldo ${persona.id}`}>{soles(saldo)}</span>
+      </div>
       <input ref={inputRef} type="file" accept="image/*" hidden
         onChange={(e) => e.target.files[0] && onSubirFoto(e.target.files[0])} />
     </div>

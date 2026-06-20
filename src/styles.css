@@ -120,32 +120,39 @@ body {
 .part-relleno.hayllin { background: linear-gradient(90deg, var(--rosa), #ff5cbf); }
 @keyframes llenar { from { width: 0 !important; } }
 
-/* Perfiles */
+/* Perfiles con foto de fondo */
 .perfiles { display: flex; gap: 14px; margin-bottom: 22px; }
 .perfil {
-  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;
-  background: var(--glass); border: 1px solid var(--glass-borde); backdrop-filter: blur(10px);
-  border-radius: 22px; padding: 18px 12px;
-}
-.perfil-avatar {
-  position: relative; width: 64px; height: 64px; border-radius: 50%;
+  position: relative; flex: 1; min-height: 150px; border-radius: 22px; overflow: hidden;
   background-color: var(--bg2); background-size: cover; background-position: center;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 26px; font-weight: 700; color: var(--texto);
-  border: 2px solid; cursor: pointer; transition: transform 0.15s;
+  border: 1px solid var(--glass-borde); transition: transform 0.15s;
 }
-.perfil-avatar:active { transform: scale(0.95); }
-.avatar-angel { border-color: var(--verde); box-shadow: 0 0 18px rgba(56,242,178,0.4); }
-.avatar-hayllin { border-color: var(--rosa); box-shadow: 0 0 18px rgba(255,122,205,0.4); }
+.perfil:active { transform: scale(0.97); }
+.perfil-angel { border-color: rgba(56,242,178,0.5); box-shadow: 0 0 20px rgba(56,242,178,0.2); }
+.perfil-hayllin { border-color: rgba(255,122,205,0.5); box-shadow: 0 0 20px rgba(255,122,205,0.2); }
+.perfil-overlay {
+  position: absolute; inset: 0;
+  background: linear-gradient(180deg, rgba(15,11,30,0.15), rgba(15,11,30,0.88));
+}
+.perfil:not(.con-foto) .perfil-overlay { background: rgba(255,255,255,0.04); }
+.perfil-contenido {
+  position: relative; height: 100%; padding: 14px;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 2px;
+}
 .perfil-cam {
-  position: absolute; bottom: -2px; right: -2px; background: var(--bg2);
-  border-radius: 50%; width: 24px; height: 24px; font-size: 12px;
-  display: flex; align-items: center; justify-content: center; border: 1px solid var(--glass-borde);
+  position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.4);
+  border: 1px solid var(--glass-borde); border-radius: 50%; width: 34px; height: 34px;
+  font-size: 15px; cursor: pointer; backdrop-filter: blur(6px); transition: transform 0.12s;
 }
-.perfil-nombre { font-size: 15px; font-weight: 600; }
-.perfil-saldo { font-size: 18px; font-weight: 700; }
+.perfil-cam:active { transform: scale(0.88); }
+.perfil-nombre { font-size: 16px; font-weight: 600; }
+.perfil-saldo { font-size: 22px; font-weight: 700; }
 .perfil-saldo.angel { color: var(--verde); }
 .perfil-saldo.hayllin { color: var(--rosa); }
+
+/* Bordes de avatar por persona (login y notificación) */
+.avatar-angel { border-color: var(--verde); }
+.avatar-hayllin { border-color: var(--rosa); }
 
 /* Meta */
 .meta-card {
