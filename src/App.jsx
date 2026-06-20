@@ -4,37 +4,48 @@ import {
   collection, doc, onSnapshot, setDoc, addDoc, updateDoc, deleteDoc, getDoc, getDocs,
 } from 'firebase/firestore'
 
-// Lee TODOS los datos actuales (para backups y descargas)
-async function leerTodo() {
-  const movs = (await getDocs(collection(db, 'movimientos'))).docs.map((d) => ({ id: d.id, ...d.data() }))
-  const personas = {}
-  ;(await getDocs(collection(db, 'personas'))).docs.forEach((d) => (personas[d.id] = d.data()))
-  return { movimientos: movs, personas }
-}
-
-// Guarda una "foto" de los datos del día en la colección backups/{fecha}, una vez por día.
-async function backupDiario() {
-  const hoy = new Date().toISOString().slice(0, 10)
-  const ref = doc(db, 'backups', hoy)
-  const snap = await getDoc(ref)
-  if (snap.exists()) return // ya se hizo hoy
-  const datos = await leerTodo()
-  await setDoc(ref, { fecha: new Date().toISOString(), ...datos })
-}
-
 // Las dos personas de la app. PIN inicial por defecto.
 const PERSONAS = [
   { id: 'hayllin', nombre: 'Hayllin', pinDefecto: '1111' },
   { id: 'angel', nombre: 'Angel', pinDefecto: '2222' },
 ]
 
+// Categorías de movimiento (icono + si suma o resta)
+const CATEGORIAS = [
+  { id: 'ahorro', nombre: 'Ahorro', icono: '💰', tipo: 'ingreso' },
+  { id: 'regalo', nombre: 'Regalo', icono: '🎁', tipo: 'ingreso' },
+  { id: 'ingreso', nombre: 'Ingreso', icono: '💵', tipo: 'ingreso' },
+  { id: 'deposito', nombre: 'Depósito', icono: '🏦', tipo: 'ingreso' },
+  { id: 'retiro', nombre: 'Retiro', icono: '🛒', tipo: 'gasto' },
+]
+const CAT_MAP = Object.fromEntries(CATEGORIAS.map((c) => [c.id, c]))
+const iconoMov = (m) => CAT_MAP[m.categoria]?.icono || (m.tipo === 'ingreso' ? '💰' : '🛒')
+
 const soles = (n) =>
-  'S/ ' + n.toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  'S/ ' + Number(n).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+// ---- Datos / backups ----
+async function leerTodo() {
+  const movs = (await getDocs(collection(db, 'movimientos'))).docs.map((d) => ({ id: d.id, ...d.data() }))
+  const personas = {}
+  ;(await getDocs(collection(db, 'personas'))).docs.forEach((d) => (personas[d.id] = d.data()))
+  return { movimientos: movs, personas }
+}
+async function backupDiario() {
+  const hoy = new Date().toISOString().slice(0, 10)
+  const ref = doc(db, 'backups', hoy)
+  const snap = await getDoc(ref)
+  if (snap.exists()) return
+  const datos = await leerTodo()
+  await setDoc(ref, { fecha: new Date().toISOString(), ...datos })
+}
 
 export default function App() {
   const [cargando, setCargando] = useState(true)
+  const [splash, setSplash] = useState(true)
   const [movimientos, setMovimientos] = useState([])
-  const [perfiles, setPerfiles] = useState({}) // { hayllin: {pin, foto}, angel: {...} }
+  const [perfiles, setPerfiles] = useState({})
+  const [meta, setMeta] = useState({ nombre: 'Nuestra meta', objetivo: 1500 })
   const [usuario, setUsuario] = useState(() => sessionStorage.getItem('na_usuario') || null)
 
   const [modalAbierto, setModalAbierto] = useState(false)
@@ -42,21 +53,29 @@ export default function App() {
   const [filtro, setFiltro] = useState('todos')
   const [ajustesAbierto, setAjustesAbierto] = useState(false)
   const [panelAbierto, setPanelAbierto] = useState(false)
+  const [metaAbierto, setMetaAbierto] = useState(false)
   const [errorApp, setErrorApp] = useState('')
-  const [exito, setExito] = useState(null) // 'ingreso' | 'gasto' al guardar
+  const [exito, setExito] = useState(null) // { tipo, monto }
   const backupHecho = useRef(false)
 
-  // Conexión a Firebase + escucha en tiempo real
+  // Splash mínimo 2 segundos
   useEffect(() => {
-    let unsubMov, unsubPer
+    const t = setTimeout(() => setSplash(false), 2000)
+    return () => clearTimeout(t)
+  }, [])
+
+  // Conexión Firebase + escucha en tiempo real
+  useEffect(() => {
+    let unsubMov, unsubPer, unsubMeta
     listoFirebase.then(async () => {
-      // Crea los perfiles por defecto si no existen todavía
       for (const p of PERSONAS) {
         const ref = doc(db, 'personas', p.id)
         const snap = await getDoc(ref)
-        if (!snap.exists()) {
-          await setDoc(ref, { pin: p.pinDefecto, foto: '' })
-        }
+        if (!snap.exists()) await setDoc(ref, { pin: p.pinDefecto, foto: '' })
+      }
+      const metaRef = doc(db, 'config', 'meta')
+      if (!(await getDoc(metaRef)).exists()) {
+        await setDoc(metaRef, { nombre: 'Nintendo Switch', objetivo: 1500 })
       }
 
       unsubMov = onSnapshot(
@@ -76,12 +95,15 @@ export default function App() {
         snap.docs.forEach((d) => (r[d.id] = d.data()))
         setPerfiles(r)
       })
+      unsubMeta = onSnapshot(doc(db, 'config', 'meta'), (snap) => {
+        if (snap.exists()) setMeta(snap.data())
+      })
     }).catch((e) => {
       setCargando(false)
       setErrorApp('No se pudo conectar a Firebase: ' + e.message +
         '. Revisa que el login Anónimo esté activado en Authentication.')
     })
-    return () => { unsubMov?.(); unsubPer?.() }
+    return () => { unsubMov?.(); unsubPer?.(); unsubMeta?.() }
   }, [])
 
   const saldos = useMemo(() => {
@@ -95,6 +117,15 @@ export default function App() {
   }, [movimientos])
 
   const total = useMemo(() => Object.values(saldos).reduce((a, b) => a + b, 0), [saldos])
+
+  // Cambio neto de los últimos 7 días
+  const estaSemana = useMemo(() => {
+    const hace7 = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return movimientos.reduce((acc, m) => {
+      if (new Date(m.fecha).getTime() < hace7) return acc
+      return acc + (m.tipo === 'ingreso' ? m.monto : -m.monto)
+    }, 0)
+  }, [movimientos])
 
   const movimientosFiltrados = useMemo(() => {
     const lista = filtro === 'todos' ? movimientos : movimientos.filter((m) => m.persona === filtro)
@@ -111,8 +142,10 @@ export default function App() {
       }
       setModalAbierto(false)
       setEditando(null)
-      setExito(resto.tipo)
-      setTimeout(() => setExito(null), 1500)
+      if (!id) {
+        setExito({ tipo: resto.tipo, monto: resto.monto })
+        setTimeout(() => setExito(null), 1600)
+      }
     } catch (e) {
       alert('No se pudo guardar: ' + e.message +
         '\n\nRevisa las reglas de Firestore y que el login Anónimo esté activado.')
@@ -120,9 +153,7 @@ export default function App() {
   }
 
   async function borrarMovimiento(id) {
-    if (confirm('¿Borrar este movimiento?')) {
-      await deleteDoc(doc(db, 'movimientos', id))
-    }
+    if (confirm('¿Borrar este movimiento?')) await deleteDoc(doc(db, 'movimientos', id))
   }
 
   function subirFoto(personaId, file) {
@@ -136,33 +167,35 @@ export default function App() {
     setAjustesAbierto(false)
   }
 
+  async function guardarMeta(datos) {
+    await setDoc(doc(db, 'config', 'meta'), datos)
+    setMetaAbierto(false)
+  }
+
   function entrar(personaId) {
     setUsuario(personaId)
     sessionStorage.setItem('na_usuario', personaId)
   }
-
   function salir() {
     setUsuario(null)
     sessionStorage.removeItem('na_usuario')
   }
 
-  if (cargando) {
-    return <PantallaCarga />
-  }
-
-  if (!usuario) {
-    return <Login perfiles={perfiles} onEntrar={entrar} />
-  }
+  if (splash || cargando) return <Splash />
+  if (!usuario) return <Login perfiles={perfiles} onEntrar={entrar} />
 
   const yo = PERSONAS.find((p) => p.id === usuario)
 
   return (
     <div className={`app tema-${usuario}`}>
+      <div className="fondo-luces" />
+
       {errorApp && (
         <div className="banner-error" onClick={() => setErrorApp('')}>
           ⚠️ {errorApp} <span className="banner-x">(tocar para cerrar)</span>
         </div>
       )}
+
       <header className="cabecera">
         <div className="cab-fila">
           <div>
@@ -179,14 +212,38 @@ export default function App() {
         </div>
       </header>
 
-      <section className="total-card">
-        <span className="total-label">Total juntos</span>
-        <span className="total-monto">{soles(total)}</span>
+      {/* Tarjeta principal - glassmorphism */}
+      <section className="total-glass">
+        <span className="total-label">💰 Total Ahorrado</span>
+        <span className="total-monto"><Contador valor={total} /></span>
+        <span className={`total-semana ${estaSemana >= 0 ? 'pos' : 'neg'}`}>
+          {estaSemana >= 0 ? '+' : '−'}{soles(Math.abs(estaSemana)).replace('S/ ', 'S/')} esta semana
+        </span>
       </section>
 
-      <section className="personas">
+      {/* Participación */}
+      <section className="participacion">
+        <h2 className="seccion-titulo">Participación</h2>
+        {PERSONAS.map((p) => {
+          const pct = total > 0 ? Math.round((Math.max(saldos[p.id], 0) / total) * 100) : 0
+          return (
+            <div className="part-fila" key={p.id}>
+              <div className="part-top">
+                <span>{p.nombre}</span>
+                <span className="part-pct">{pct}%</span>
+              </div>
+              <div className="part-barra">
+                <div className={`part-relleno ${p.id}`} style={{ width: pct + '%' }} />
+              </div>
+            </div>
+          )
+        })}
+      </section>
+
+      {/* Perfiles de integrantes */}
+      <section className="perfiles">
         {PERSONAS.map((p) => (
-          <TarjetaPersona
+          <PerfilPersona
             key={p.id}
             persona={p}
             saldo={saldos[p.id]}
@@ -197,9 +254,13 @@ export default function App() {
         ))}
       </section>
 
+      {/* Meta */}
+      <MetaCard meta={meta} total={total} onEditar={() => setMetaAbierto(true)} />
+
+      {/* Movimientos */}
       <section className="historial">
         <div className="historial-head">
-          <h2>Movimientos</h2>
+          <h2 className="seccion-titulo">Movimientos</h2>
           <div className="filtros">
             <button className={filtro === 'todos' ? 'chip activo' : 'chip'} onClick={() => setFiltro('todos')}>Todos</button>
             {PERSONAS.map((p) => (
@@ -218,18 +279,20 @@ export default function App() {
               const persona = PERSONAS.find((p) => p.id === m.persona)
               return (
                 <li key={m.id} className="item">
-                  <div className={`punto ${m.tipo}`} />
+                  <div className={`item-icono ${m.tipo}`}>{iconoMov(m)}</div>
                   <div className="item-info">
-                    <span className="item-desc">{m.descripcion || (m.tipo === 'ingreso' ? 'Ahorro' : 'Gasto')}</span>
-                    <span className="item-meta">{persona?.nombre} · {new Date(m.fecha).toLocaleDateString('es-PE')}</span>
+                    <span className="item-desc">{m.descripcion || CAT_MAP[m.categoria]?.nombre || (m.tipo === 'ingreso' ? 'Ahorro' : 'Retiro')}</span>
+                    <span className="item-meta">{persona?.nombre} · {new Date(m.fecha).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
                   </div>
-                  <span className={`item-monto ${m.tipo}`}>{m.tipo === 'ingreso' ? '+' : '−'} {soles(m.monto)}</span>
-                  {m.persona === usuario && (
-                    <div className="item-acciones">
-                      <button className="btn-mini" onClick={() => { setEditando(m); setModalAbierto(true) }}>Editar</button>
-                      <button className="btn-mini borrar" onClick={() => borrarMovimiento(m.id)}>Borrar</button>
-                    </div>
-                  )}
+                  <div className="item-derecha">
+                    <span className={`item-monto ${m.tipo}`}>{m.tipo === 'ingreso' ? '+' : '−'}{soles(m.monto).replace('S/ ', 'S/')}</span>
+                    {m.persona === usuario && (
+                      <div className="item-acciones">
+                        <button className="btn-mini" onClick={() => { setEditando(m); setModalAbierto(true) }}>Editar</button>
+                        <button className="btn-mini borrar" onClick={() => borrarMovimiento(m.id)}>Borrar</button>
+                      </div>
+                    )}
+                  </div>
                 </li>
               )
             })}
@@ -240,148 +303,58 @@ export default function App() {
       <button className="fab" onClick={() => { setEditando(null); setModalAbierto(true) }}>+</button>
 
       {modalAbierto && (
-        <ModalMovimiento
-          inicial={editando}
-          usuario={usuario}
+        <ModalMovimiento inicial={editando} usuario={usuario}
           onGuardar={guardarMovimiento}
-          onCerrar={() => { setModalAbierto(false); setEditando(null) }}
-        />
+          onCerrar={() => { setModalAbierto(false); setEditando(null) }} />
       )}
-
       {ajustesAbierto && (
         <ModalPin nombre={yo?.nombre} onGuardar={cambiarPin} onCerrar={() => setAjustesAbierto(false)} />
       )}
-
+      {metaAbierto && (
+        <ModalMeta meta={meta} onGuardar={guardarMeta} onCerrar={() => setMetaAbierto(false)} />
+      )}
       {panelAbierto && (
         <PanelDev movimientos={movimientos} onCerrar={() => setPanelAbierto(false)} />
       )}
-
-      {exito && <AnimacionExito tipo={exito} />}
+      {exito && <AnimacionExito tipo={exito.tipo} monto={exito.monto} />}
     </div>
   )
 }
 
-function PantallaCarga() {
-  return (
-    <div className="carga">
-      <div className="carga-moneda">
-        <div className="moneda">S/</div>
-      </div>
-      <h1 className="titulo-app titulo-carga">Nuestros<span>Ahorros</span></h1>
-      <div className="carga-puntos"><i></i><i></i><i></i></div>
-    </div>
-  )
-}
-
-function AnimacionExito({ tipo }) {
-  return (
-    <div className="exito-fondo">
-      <div className={`exito-circulo ${tipo}`}>
-        <svg viewBox="0 0 52 52" className="exito-check">
-          <path d="M14 27 l8 8 l16 -16" fill="none" stroke="white" strokeWidth="5"
-            strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-      <span className="exito-texto">{tipo === 'ingreso' ? '¡Ahorro guardado!' : 'Gasto registrado'}</span>
-    </div>
-  )
-}
-
-function PanelDev({ movimientos, onCerrar }) {
-  const [backups, setBackups] = useState([])
-  const [estado, setEstado] = useState('')
-  const [cargandoLista, setCargandoLista] = useState(true)
-
-  async function cargarBackups() {
-    setCargandoLista(true)
-    const snap = await getDocs(collection(db, 'backups'))
-    const lista = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => b.id.localeCompare(a.id))
-    setBackups(lista)
-    setCargandoLista(false)
-  }
-
-  useEffect(() => { cargarBackups() }, [])
-
-  async function crearBackupAhora() {
-    setEstado('Creando backup…')
-    const hoy = new Date().toISOString().slice(0, 10)
-    const datos = await leerTodo()
-    await setDoc(doc(db, 'backups', hoy), { fecha: new Date().toISOString(), ...datos })
-    setEstado('✅ Backup de hoy guardado')
-    cargarBackups()
-  }
-
-  async function descargarTodo() {
-    const datos = await leerTodo()
-    const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `ahorros-backup-${new Date().toISOString().slice(0, 10)}.json`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  async function restaurar(backup) {
-    if (!confirm(`¿Restaurar el backup del ${backup.id}? Esto reemplazará TODOS los movimientos actuales.`)) return
-    setEstado('Restaurando…')
-    // Borra movimientos actuales
-    const actuales = await getDocs(collection(db, 'movimientos'))
-    await Promise.all(actuales.docs.map((d) => deleteDoc(doc(db, 'movimientos', d.id))))
-    // Reinserta los del backup
-    await Promise.all(
-      (backup.movimientos || []).map(({ id, ...m }) => setDoc(doc(db, 'movimientos', id), m))
-    )
-    // Restaura perfiles (PIN y fotos)
-    for (const [pid, datos] of Object.entries(backup.personas || {})) {
-      await setDoc(doc(db, 'personas', pid), datos)
+/* ---------- Contador animado ---------- */
+function Contador({ valor }) {
+  const [mostrado, setMostrado] = useState(valor)
+  const ref = useRef(valor)
+  useEffect(() => {
+    const inicio = ref.current, fin = valor, dur = 900, t0 = performance.now()
+    let raf
+    const tick = (t) => {
+      const p = Math.min((t - t0) / dur, 1)
+      const e = 1 - Math.pow(1 - p, 3)
+      setMostrado(inicio + (fin - inicio) * e)
+      if (p < 1) raf = requestAnimationFrame(tick)
+      else ref.current = fin
     }
-    setEstado(`✅ Restaurado el backup del ${backup.id}`)
-  }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [valor])
+  return <>{soles(mostrado)}</>
+}
 
+/* ---------- Splash ---------- */
+function Splash() {
   return (
-    <div className="modal-fondo" onClick={onCerrar}>
-      <div className="modal panel" onClick={(e) => e.stopPropagation()}>
-        <h3>🛠️ Panel Dev — Angel</h3>
-        <p className="panel-info">
-          Movimientos actuales: <b>{movimientos.length}</b><br />
-          Backup automático: <b>1 vez al día</b> al abrir la app.
-        </p>
-
-        <div className="panel-acciones">
-          <button className="btn-primario" onClick={crearBackupAhora}>Crear backup ahora</button>
-          <button className="btn-secundario" onClick={descargarTodo}>Descargar todo (.json)</button>
-        </div>
-
-        {estado && <p className="panel-estado">{estado}</p>}
-
-        <h4 className="panel-titulo">Backups en la nube</h4>
-        {cargandoLista ? (
-          <p className="panel-info">Cargando…</p>
-        ) : backups.length === 0 ? (
-          <p className="panel-info">Aún no hay backups.</p>
-        ) : (
-          <ul className="panel-lista">
-            {backups.map((b) => (
-              <li key={b.id}>
-                <div>
-                  <span className="bk-fecha">{b.id}</span>
-                  <span className="bk-meta">{(b.movimientos || []).length} movimientos</span>
-                </div>
-                <button className="btn-restaurar" onClick={() => restaurar(b)}>Restaurar</button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <button className="btn-secundario" style={{ marginTop: 16 }} onClick={onCerrar}>Cerrar</button>
+    <div className="splash">
+      <div className="splash-particulas">
+        {Array.from({ length: 14 }).map((_, i) => <span key={i} style={{ '--i': i }} />)}
       </div>
+      <div className="splash-logo"><span>S/</span></div>
+      <h1 className="splash-nombre">Nuestros Ahorros</h1>
     </div>
   )
 }
 
+/* ---------- Login ---------- */
 function Login({ perfiles, onEntrar }) {
   const [seleccion, setSeleccion] = useState(null)
   const [pin, setPin] = useState('')
@@ -389,20 +362,17 @@ function Login({ perfiles, onEntrar }) {
 
   function intentar(e) {
     e.preventDefault()
-    const correcto = perfiles[seleccion]?.pin ||
-      PERSONAS.find((p) => p.id === seleccion)?.pinDefecto
-    if (pin === correcto) {
-      onEntrar(seleccion)
-    } else {
-      setError('PIN incorrecto')
-      setPin('')
-    }
+    const correcto = perfiles[seleccion]?.pin || PERSONAS.find((p) => p.id === seleccion)?.pinDefecto
+    if (pin === correcto) onEntrar(seleccion)
+    else { setError('PIN incorrecto'); setPin('') }
   }
 
   if (!seleccion) {
     return (
       <div className="login">
-        <h1>Nuestros Ahorros</h1>
+        <div className="fondo-luces" />
+        <div className="splash-logo chico"><span>S/</span></div>
+        <h1 className="titulo-app grande">Nuestros<span>Ahorros</span></h1>
         <p className="sub">¿Quién entra?</p>
         <div className="login-personas">
           {PERSONAS.map((p) => (
@@ -421,54 +391,69 @@ function Login({ perfiles, onEntrar }) {
   const persona = PERSONAS.find((p) => p.id === seleccion)
   return (
     <form className={`login tema-${seleccion}`} onSubmit={intentar}>
+      <div className="fondo-luces" />
+      <div className={`login-avatar grande avatar-${seleccion}`} style={perfiles[seleccion]?.foto ? { backgroundImage: `url(${perfiles[seleccion].foto})` } : undefined}>
+        {!perfiles[seleccion]?.foto && persona.nombre[0]}
+      </div>
       <h1>Hola, {persona.nombre}</h1>
       <p className="sub">Ingresa tu PIN</p>
-      <input
-        className="pin-input"
-        type="password"
-        inputMode="numeric"
-        maxLength={8}
-        value={pin}
-        autoFocus
-        onChange={(e) => { setPin(e.target.value); setError('') }}
-        placeholder="••••"
-      />
+      <input className="pin-input" type="password" inputMode="numeric" maxLength={8} value={pin} autoFocus
+        onChange={(e) => { setPin(e.target.value); setError('') }} placeholder="••••" />
       {error && <span className="error">{error}</span>}
       <button type="submit" className="btn-primario">Entrar</button>
-      <button type="button" className="btn-texto" onClick={() => { setSeleccion(null); setPin(''); setError('') }}>
-        ← Volver
-      </button>
+      <button type="button" className="btn-texto" onClick={() => { setSeleccion(null); setPin(''); setError('') }}>← Volver</button>
     </form>
   )
 }
 
-function TarjetaPersona({ persona, saldo, foto, puedeEditar, onSubirFoto }) {
+/* ---------- Perfil de persona ---------- */
+function PerfilPersona({ persona, saldo, foto, puedeEditar, onSubirFoto }) {
   const inputRef = useRef(null)
   return (
-    <div className={`persona-card persona-${persona.id}`} style={foto ? { backgroundImage: `url(${foto})` } : undefined}>
-      <div className="persona-overlay" />
-      <div className="persona-contenido">
-        <div className="persona-top">
-          <span className="persona-nombre">{persona.nombre}</span>
-          {puedeEditar && <button className="btn-foto" onClick={() => inputRef.current?.click()}>📷</button>}
-        </div>
-        <span className="persona-label">Ahorro</span>
-        <span className="persona-saldo">{soles(saldo)}</span>
-      </div>
+    <div className={`perfil perfil-${persona.id}`}>
+      <button className={`perfil-avatar avatar-${persona.id}`} onClick={() => puedeEditar && inputRef.current?.click()}
+        style={foto ? { backgroundImage: `url(${foto})` } : undefined}>
+        {!foto && persona.nombre[0]}
+        {puedeEditar && <span className="perfil-cam">📷</span>}
+      </button>
+      <span className="perfil-nombre">{persona.nombre}</span>
+      <span className={`perfil-saldo ${persona.id}`}>{soles(saldo)}</span>
       <input ref={inputRef} type="file" accept="image/*" hidden
         onChange={(e) => e.target.files[0] && onSubirFoto(e.target.files[0])} />
     </div>
   )
 }
 
+/* ---------- Meta ---------- */
+function MetaCard({ meta, total, onEditar }) {
+  const pct = meta.objetivo > 0 ? Math.min(Math.round((total / meta.objetivo) * 100), 100) : 0
+  return (
+    <section className="meta-card" onClick={onEditar}>
+      <div className="meta-head">
+        <span className="meta-titulo">🎯 Meta Familiar</span>
+        <span className="meta-editar">editar</span>
+      </div>
+      <span className="meta-nombre">{meta.nombre}</span>
+      <div className="meta-barra"><div className="meta-relleno" style={{ width: pct + '%' }} /></div>
+      <div className="meta-pie">
+        <span>{soles(total)} de {soles(meta.objetivo)}</span>
+        <span className="meta-pct">{pct}%</span>
+      </div>
+    </section>
+  )
+}
+
+/* ---------- Modal movimiento ---------- */
 function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
-  const [persona, setPersona] = useState(inicial?.persona || usuario)
-  const [tipo, setTipo] = useState(inicial?.tipo || 'ingreso')
+  const [categoria, setCategoria] = useState(
+    inicial?.categoria || (inicial?.tipo === 'gasto' ? 'retiro' : 'ahorro')
+  )
   const [monto, setMonto] = useState(inicial ? String(inicial.monto) : '')
   const [descripcion, setDescripcion] = useState(inicial?.descripcion || '')
   const [fecha, setFecha] = useState(
     inicial?.fecha ? inicial.fecha.slice(0, 10) : new Date().toISOString().slice(0, 10)
   )
+  const persona = inicial?.persona || usuario
 
   function submit(e) {
     e.preventDefault()
@@ -476,7 +461,10 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
     if (!valor || valor <= 0) { alert('Ingresa un monto válido'); return }
     onGuardar({
       id: inicial?.id,
-      persona, tipo, monto: valor,
+      persona,
+      categoria,
+      tipo: CAT_MAP[categoria].tipo,
+      monto: valor,
       descripcion: descripcion.trim(),
       fecha: new Date(fecha).toISOString(),
     })
@@ -486,15 +474,18 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
     <div className="modal-fondo" onClick={onCerrar}>
       <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h3>{inicial ? 'Editar movimiento' : 'Nuevo movimiento'}</h3>
-
-        <div className="modal-persona">
-          {PERSONAS.find((p) => p.id === persona)?.nombre}
-        </div>
+        <div className="modal-persona">{PERSONAS.find((p) => p.id === persona)?.nombre}</div>
 
         <label>Tipo</label>
-        <div className="segmento">
-          <button type="button" className={tipo === 'ingreso' ? 'seg activo ingreso' : 'seg'} onClick={() => setTipo('ingreso')}>Ahorro (+)</button>
-          <button type="button" className={tipo === 'gasto' ? 'seg activo gasto' : 'seg'} onClick={() => setTipo('gasto')}>Gasto (−)</button>
+        <div className="cat-grid">
+          {CATEGORIAS.map((c) => (
+            <button type="button" key={c.id}
+              className={`cat-btn ${categoria === c.id ? 'activo ' + c.tipo : ''}`}
+              onClick={() => setCategoria(c.id)}>
+              <span className="cat-ico">{c.icono}</span>
+              <span>{c.nombre}</span>
+            </button>
+          ))}
         </div>
 
         <label>Monto (S/)</label>
@@ -515,18 +506,17 @@ function ModalMovimiento({ inicial, usuario, onGuardar, onCerrar }) {
   )
 }
 
+/* ---------- Modal PIN ---------- */
 function ModalPin({ nombre, onGuardar, onCerrar }) {
   const [pin1, setPin1] = useState('')
   const [pin2, setPin2] = useState('')
   const [error, setError] = useState('')
-
   function submit(e) {
     e.preventDefault()
     if (pin1.length < 4) { setError('El PIN debe tener al menos 4 dígitos'); return }
     if (pin1 !== pin2) { setError('Los PIN no coinciden'); return }
     onGuardar(pin1)
   }
-
   return (
     <div className="modal-fondo" onClick={onCerrar}>
       <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
@@ -541,6 +531,118 @@ function ModalPin({ nombre, onGuardar, onCerrar }) {
           <button type="submit" className="btn-primario">Guardar</button>
         </div>
       </form>
+    </div>
+  )
+}
+
+/* ---------- Modal Meta ---------- */
+function ModalMeta({ meta, onGuardar, onCerrar }) {
+  const [nombre, setNombre] = useState(meta.nombre)
+  const [objetivo, setObjetivo] = useState(String(meta.objetivo))
+  function submit(e) {
+    e.preventDefault()
+    const obj = parseFloat(objetivo)
+    if (!obj || obj <= 0) { alert('Ingresa un objetivo válido'); return }
+    onGuardar({ nombre: nombre.trim() || 'Nuestra meta', objetivo: obj })
+  }
+  return (
+    <div className="modal-fondo" onClick={onCerrar}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h3>🎯 Meta Familiar</h3>
+        <label>¿Qué quieren lograr?</label>
+        <input type="text" placeholder="Ej: Nintendo Switch, viaje..." value={nombre} onChange={(e) => setNombre(e.target.value)} autoFocus />
+        <label>Monto objetivo (S/)</label>
+        <input type="number" inputMode="decimal" step="0.01" value={objetivo} onChange={(e) => setObjetivo(e.target.value)} />
+        <div className="modal-acciones">
+          <button type="button" className="btn-secundario" onClick={onCerrar}>Cancelar</button>
+          <button type="submit" className="btn-primario">Guardar</button>
+        </div>
+      </form>
+    </div>
+  )
+}
+
+/* ---------- Animación de éxito ---------- */
+function AnimacionExito({ tipo, monto }) {
+  return (
+    <div className="exito-fondo">
+      <div className={`exito-circulo ${tipo}`}>
+        <svg viewBox="0 0 52 52" className="exito-check">
+          <path d="M14 27 l8 8 l16 -16" fill="none" stroke="white" strokeWidth="5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <span className="exito-texto">{tipo === 'ingreso' ? '+' : '−'}{soles(monto).replace('S/ ', 'S/')}</span>
+    </div>
+  )
+}
+
+/* ---------- Panel Dev ---------- */
+function PanelDev({ movimientos, onCerrar }) {
+  const [backups, setBackups] = useState([])
+  const [estado, setEstado] = useState('')
+  const [cargandoLista, setCargandoLista] = useState(true)
+
+  async function cargarBackups() {
+    setCargandoLista(true)
+    const snap = await getDocs(collection(db, 'backups'))
+    setBackups(snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => b.id.localeCompare(a.id)))
+    setCargandoLista(false)
+  }
+  useEffect(() => { cargarBackups() }, [])
+
+  async function crearBackupAhora() {
+    setEstado('Creando backup…')
+    const hoy = new Date().toISOString().slice(0, 10)
+    const datos = await leerTodo()
+    await setDoc(doc(db, 'backups', hoy), { fecha: new Date().toISOString(), ...datos })
+    setEstado('✅ Backup de hoy guardado')
+    cargarBackups()
+  }
+  async function descargarTodo() {
+    const datos = await leerTodo()
+    const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `ahorros-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  async function restaurar(backup) {
+    if (!confirm(`¿Restaurar el backup del ${backup.id}? Esto reemplazará TODOS los movimientos actuales.`)) return
+    setEstado('Restaurando…')
+    const actuales = await getDocs(collection(db, 'movimientos'))
+    await Promise.all(actuales.docs.map((d) => deleteDoc(doc(db, 'movimientos', d.id))))
+    await Promise.all((backup.movimientos || []).map(({ id, ...m }) => setDoc(doc(db, 'movimientos', id), m)))
+    for (const [pid, datos] of Object.entries(backup.personas || {})) await setDoc(doc(db, 'personas', pid), datos)
+    setEstado(`✅ Restaurado el backup del ${backup.id}`)
+  }
+
+  return (
+    <div className="modal-fondo" onClick={onCerrar}>
+      <div className="modal panel" onClick={(e) => e.stopPropagation()}>
+        <h3>🛠️ Panel Dev — Angel</h3>
+        <p className="panel-info">Movimientos actuales: <b>{movimientos.length}</b><br />Backup automático: <b>1 vez al día</b>.</p>
+        <div className="panel-acciones">
+          <button className="btn-primario" onClick={crearBackupAhora}>Crear backup ahora</button>
+          <button className="btn-secundario" onClick={descargarTodo}>Descargar todo (.json)</button>
+        </div>
+        {estado && <p className="panel-estado">{estado}</p>}
+        <h4 className="panel-titulo">Backups en la nube</h4>
+        {cargandoLista ? <p className="panel-info">Cargando…</p> : backups.length === 0 ? (
+          <p className="panel-info">Aún no hay backups.</p>
+        ) : (
+          <ul className="panel-lista">
+            {backups.map((b) => (
+              <li key={b.id}>
+                <div><span className="bk-fecha">{b.id}</span><span className="bk-meta">{(b.movimientos || []).length} movimientos</span></div>
+                <button className="btn-restaurar" onClick={() => restaurar(b)}>Restaurar</button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <button className="btn-secundario" style={{ marginTop: 16 }} onClick={onCerrar}>Cerrar</button>
+      </div>
     </div>
   )
 }
